@@ -65,7 +65,7 @@ The analysis is organised into sequential steps:
 
 ### 4. Association analyses
 - `05_run_logistic_models.R`  
-  Runs logistic regression models across multiple outcomes and PRS, including interaction terms with selected moderators (e.g., age, sex, baseline severity).
+  Runs logistic regression models across multiple outcomes and PRS, including interaction terms with selected moderators (e.g., age, sex, baseline severity, population principal components).
 
 Outputs include:
 - Model summaries  
