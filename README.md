@@ -1,6 +1,8 @@
 # Transdiagnostic PRS and Treatment Outcomes
 
-This repository contains scripts for preprocessing GWAS summary statistics, computing polygenic risk scores (PRS) using PRS-CS, and testing their association with treatment outcomes in a MDD cohort (GSRD).
+This repository contains scripts for preprocessing GWAS summary statistics, computing polygenic risk scores (PRS) using PRS-CS, preparing cohort-level datasets with PRS and covariates, and testing their association with treatment outcomes.
+
+The code is designed to be applied across different cohorts and can be adapted to datasets with similar structure.
 
 The pipeline integrates:
 - GWAS summary statistics preprocessing  
@@ -42,7 +44,7 @@ The analysis is organised into sequential steps:
 
 ### 2. PRS computation
 - `02_run_PRScs.sh`  
-  Runs PRS-CS across chromosomes using a Bayesian framework.
+  Runs PRS-CS separately across chromosomes using a Bayesian framework and parallel tmux sessions.
 
 - `03_compute_PRSs.sh`  
   Combines chromosome-specific weights and computes PRS using PLINK2.
@@ -51,23 +53,25 @@ The analysis is organised into sequential steps:
 
 ### 3. Dataset preparation
 - `04_prepare_dataset.R`  
-  - Merges PRS with clinical data  
+  - Reads a cohort-level dataset  
+  - Merges PRS with the cohort dataset  
   - Merges external covariates (e.g., principal components, site variables)  
-  - Harmonises duplicated variables  
-  - Converts variable types  
+  - Harmonises duplicated variables created during merging  
+  - Converts variable types where needed  
   - Computes z-scores for PRS  
+  - Derives analysis-ready outcomes when required  
 
 ---
 
 ### 4. Association analyses
 - `05_run_logistic_models.R`  
-  Runs logistic regression models across multiple outcomes and PRS, including interaction terms with key moderators (age, sex, baseline severity).
+  Runs logistic regression models across multiple outcomes and PRS, including interaction terms with selected moderators (e.g., age, sex, baseline severity).
 
 Outputs include:
 - Model summaries  
 - Odds ratios and confidence intervals  
 - Log files  
-- Plots for significant effects  
+- Plots for PRS-related effects meeting the specified p-value threshold  
 
 ---
 
@@ -92,6 +96,7 @@ q < 0.10 (two-sided)
 - Python 2 (for LDSC)
 - Python 3 (for PRS-CS)
 - PLINK2
+- tmux
 
 ### External tools
 - LDSC: https://github.com/bulik/ldsc  
@@ -109,7 +114,7 @@ q < 0.10 (two-sided)
 ## Data
 
 - GWAS summary statistics are publicly available and should be downloaded separately.
-- Individual-level clinical data are not included in this repository.
+- Individual-level cohort data are not included in this repository.
 
 All scripts require user-defined paths to input and output files.
 
@@ -134,9 +139,10 @@ Run the pipeline in the following order:
 ## Notes
 
 - File paths must be specified manually in each script.  
-- Scripts assume consistent subject identifiers across datasets (`GenID` / `IID`).  
+- Scripts assume consistent subject identifiers across datasets (e.g., genetic ID and PRS ID) after harmonisation if needed.  
 - PRS are standardised (z-scores) before analysis.  
 - Logistic models are fitted using complete-case data.  
+- Variable names, outcome definitions, and covariate structures may need to be adapted depending on the cohort.  
 
 ---
 
