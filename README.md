@@ -1,4 +1,4 @@
-# Transdiagnostic PRS and Treatment Outcomes
+# Latent Genomic Factors and and Treatment Outcomes
 
 This repository contains scripts for preprocessing GWAS summary statistics, computing polygenic risk scores (PRS) using PRS-CS, preparing cohort-level datasets with PRS and covariates, and testing their association with treatment outcomes.
 
