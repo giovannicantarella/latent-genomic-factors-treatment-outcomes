@@ -1,4 +1,3 @@
-````markdown
 # Latent Genomic Factors and Treatment Outcomes
 
 This repository contains scripts for preprocessing GWAS summary statistics, computing polygenic scores (PGSs) using PRS-CS, preparing cohort-level datasets with PGSs and covariates, and testing their association with treatment outcomes.
