@@ -5,12 +5,13 @@ This repository contains scripts for preprocessing GWAS summary statistics, comp
 The code is designed to be applied across different cohorts and can be adapted to datasets with similar structure.
 
 The pipeline integrates:
-- GWAS summary statistics preprocessing  
-- PGS computation (PRS-CS + PLINK2)  
-- Dataset preparation  
-- Frequentist logistic regression analyses  
-- Multiple testing correction  
-- Bayesian sensitivity analyses  
+
+* GWAS summary statistics preprocessing
+* PGS computation (PRS-CS + PLINK2)
+* Dataset preparation
+* Frequentist logistic regression analyses
+* Multiple testing correction
+* Bayesian sensitivity analyses
 
 ---
 
@@ -36,14 +37,14 @@ Each script represents one step of the pipeline and can be adapted to different 
 
 The analysis is structured in eight sequential steps:
 
-1. Effective sample size calculation  
-2. GWAS summary statistics preprocessing  
-3. PRS-CS estimation  
-4. Individual-level PGS computation  
-5. Dataset preparation  
-6. Frequentist association analyses  
-7. Multiple testing correction  
-8. Bayesian sensitivity analyses  
+1. Effective sample size calculation
+2. GWAS summary statistics preprocessing
+3. PRS-CS estimation
+4. Individual-level PGS computation
+5. Dataset preparation
+6. Frequentist association analyses
+7. Multiple testing correction
+8. Bayesian sensitivity analyses
 
 ---
 
@@ -54,9 +55,10 @@ The analysis is structured in eight sequential steps:
 Computes the effective sample size (Neff) from GWAS summary statistics.
 
 Main steps:
-- Read GWAS summary statistics  
-- Calculate effective sample size  
-- Generate output for downstream preprocessing  
+
+* Read GWAS summary statistics
+* Calculate effective sample size
+* Generate output for downstream preprocessing
 
 ---
 
@@ -65,13 +67,15 @@ Main steps:
 Formats and filters summary statistics using LDSC.
 
 Main features:
-- INFO filtering  
-- MAF filtering  
-- HapMap3 SNP restriction  
-- LDSC-compatible formatting  
+
+* INFO filtering
+* MAF filtering
+* HapMap3 SNP restriction
+* LDSC-compatible formatting
 
 Output:
-- Filtered summary statistics for downstream PGS computation  
+
+* Filtered summary statistics for downstream PGS computation
 
 ---
 
@@ -80,13 +84,15 @@ Output:
 Runs PRS-CS separately across chromosomes.
 
 Main features:
-- Bayesian continuous-shrinkage framework  
-- Chromosome-wise estimation  
-- Parallel execution using tmux sessions  
-- Posterior SNP weight estimation  
+
+* Bayesian continuous-shrinkage framework
+* Chromosome-wise estimation
+* Parallel execution using tmux sessions
+* Posterior SNP weight estimation
 
 Output:
-- Chromosome-specific posterior SNP weights  
+
+* Chromosome-specific posterior SNP weights
 
 ---
 
@@ -95,10 +101,11 @@ Output:
 Combines chromosome-specific weights and computes individual-level PGSs using PLINK2.
 
 Main steps:
-- Combine chromosome-specific PRS-CS weights  
-- Prepare scoring files  
-- Compute individual-level PGSs  
-- Generate score files for each latent genomic factor  
+
+* Combine chromosome-specific PRS-CS weights
+* Prepare scoring files
+* Compute individual-level PGSs
+* Generate score files for each latent genomic factor
 
 ---
 
@@ -107,13 +114,14 @@ Main steps:
 Builds the cohort-level analytic dataset.
 
 Main steps:
-- Read cohort-level data  
-- Merge PGSs with the cohort dataset  
-- Merge external covariates (e.g. ancestry principal components and site variables)  
-- Harmonise duplicated variables created during merging  
-- Convert variable types where needed  
-- Standardise PGSs  
-- Derive analysis-ready outcomes when required  
+
+* Read cohort-level data
+* Merge PGSs with the cohort dataset
+* Merge external covariates (e.g. ancestry principal components and site variables)
+* Harmonise duplicated variables created during merging
+* Convert variable types where needed
+* Standardise PGSs
+* Derive analysis-ready outcomes when required
 
 ---
 
@@ -122,22 +130,37 @@ Main steps:
 Runs logistic regression models across multiple outcomes and PGSs.
 
 Main features:
-- Base models including PGS and prespecified covariates  
-- PGS × baseline severity interaction models  
-- PGS × sex interaction models  
-- PGS × age interaction models  
-- Model comparison using likelihood-ratio tests and AIC  
-- Interaction retention based on LRT p < 0.05 and ΔAIC ≥ 2  
-- 10-fold out-of-fold AUC estimation  
-- Post-hoc predicted probabilities for retained interactions  
-- Simple PGS slopes and contrasts across moderator levels  
+
+* Covariate-only reference models including age, sex, baseline severity, ancestry principal components, and recruitment site
+* Base models including PGS and prespecified covariates
+* PGS × baseline severity interaction models
+* PGS × sex interaction models
+* PGS × age interaction models
+* Model comparison using likelihood-ratio tests and AIC
+* Interaction retention based on LRT p < 0.05 and ΔAIC ≥ 2
+* 10-fold out-of-fold AUC estimation
+* Tjur’s and McFadden’s pseudo-R² for covariate-only and selected models
+* Incremental pseudo-R² relative to the covariate-only model
+* Post-hoc predicted probabilities for retained interactions
+* Simple PGS slopes and contrasts across moderator levels
+
+For selected main-effect models, incremental pseudo-R² reflects the addition of the PGS term to the covariate-only model.
+
+For selected moderation models, incremental pseudo-R² reflects the joint addition of the PGS main effect and the corresponding PGS × moderator interaction term.
+
+Incremental pseudo-R² values are reported in percentage points (pp).
 
 Output:
-- Model selection summaries  
-- Odds ratios and 95% confidence intervals  
-- Out-of-fold AUC estimates  
-- Predicted probabilities  
-- Simple-slope estimates and contrasts  
+
+* Model selection summaries
+* Odds ratios and 95% confidence intervals
+* Coefficient-specific p-values
+* Out-of-fold AUC estimates
+* Tjur’s and McFadden’s pseudo-R² estimates
+* Incremental pseudo-R² values
+* Model performance tables
+* Predicted probabilities
+* Simple-slope estimates and contrasts
 
 ---
 
@@ -146,9 +169,10 @@ Output:
 Applies the Benjamini–Hochberg false discovery rate correction to frequentist association results.
 
 Main features:
-- Correction across outcome-specific tests within each PGS  
-- Two-sided statistical testing  
-- FDR significance threshold of q < 0.05  
+
+* Correction across outcome-specific tests within each PGS
+* Two-sided statistical testing
+* FDR significance threshold of q < 0.05
 
 ---
 
@@ -157,16 +181,18 @@ Main features:
 Re-estimates the models selected in the frequentist analysis using Bayesian logistic regression.
 
 Main features:
-- Same model specification selected in the frequentist analysis  
-- No additional model-selection step  
-- Weakly informative Normal(0, 0.5) priors for regression coefficients  
-- Posterior odds ratios and 95% credible intervals  
-- Posterior predicted probabilities for retained interaction models  
+
+* Same model specification selected in the frequentist analysis
+* No additional model-selection step
+* Weakly informative Normal(0, 0.5) priors for regression coefficients
+* Posterior odds ratios and 95% credible intervals
+* Posterior predicted probabilities for retained interaction models
 
 Output:
-- Posterior coefficient estimates  
-- Posterior odds ratios and credible intervals  
-- Posterior predicted probabilities  
+
+* Posterior coefficient estimates
+* Posterior odds ratios and credible intervals
+* Posterior predicted probabilities
 
 ---
 
@@ -175,63 +201,67 @@ Output:
 R (≥ 4.0 recommended)
 
 Additional software:
-- Bash  
-- Python 2 (for LDSC)  
-- Python 3 (for PRS-CS)  
-- PLINK2  
-- tmux  
+
+* Bash
+* Python 2 (for LDSC)
+* Python 3 (for PRS-CS)
+* PLINK2
+* tmux
 
 Key R packages:
-- dplyr  
-- tidyr  
-- tibble  
-- readr  
-- stringr  
-- ggplot2  
-- emmeans  
-- writexl  
-- rstanarm  
-- posterior  
+
+* dplyr
+* tidyr
+* tibble
+* readr
+* stringr
+* ggplot2
+* emmeans
+* writexl
+* rstanarm
+* posterior
 
 External tools:
-- LDSC: https://github.com/bulik/ldsc  
-- PRS-CS: https://github.com/getian107/PRScs  
+
+* LDSC: https://github.com/bulik/ldsc
+* PRS-CS: https://github.com/getian107/PRScs
 
 ---
 
 ## Data
 
-- GWAS summary statistics are publicly available and should be downloaded separately  
-- Individual-level cohort data are not included in this repository  
-- Input and output paths must be adapted locally  
+* GWAS summary statistics are publicly available and should be downloaded separately
+* Individual-level cohort data are not included in this repository
+* Input and output paths must be adapted locally
 
 ---
 
 ## General principles
 
-- Scripts are generic templates, not cohort-specific pipelines  
-- Cohort differences are handled at the level of:
-  - input data  
-  - variable naming  
-  - outcome definitions  
-  - covariate and site structures  
-- The same complete-case sample is used when comparing candidate models for each PGS-outcome pair  
-- Continuous predictors are standardised before regression modelling  
-- Bayesian models reproduce the specifications selected in the frequentist analysis  
+* Scripts are generic templates, not cohort-specific pipelines
+* Cohort differences are handled at the level of:
+
+  * input data
+  * variable naming
+  * outcome definitions
+  * covariate and site structures
+* The same complete-case sample is used when comparing candidate models for each PGS-outcome pair
+* Covariate-only and selected models are evaluated on the same analysis sample when calculating incremental pseudo-R²
+* Continuous predictors are standardised before regression modelling
+* Bayesian models reproduce the specifications selected in the frequentist analysis
 
 ---
 
 ## Notes
 
-- Scripts are intended to be run sequentially  
-- File paths must be adapted locally  
-- Subject identifiers should be harmonised across datasets before merging  
-- Raw individual-level data are not included in this repository  
-- Outputs are generated as tables and model objects for downstream use  
+* Scripts are intended to be run sequentially
+* File paths must be adapted locally
+* Subject identifiers should be harmonised across datasets before merging
+* Raw individual-level data are not included in this repository
+* Outputs are generated as tables and model objects for downstream use
 
 ---
 
 ## Contact
 
 For questions or collaboration, please contact the repository owner.
-````
