@@ -1,6 +1,6 @@
 # ============================================================
 # Project: Latent Genomic Factors and Treatment Outcomes
-# Script: 05_run_frequentist_models.R
+# Script: Frequentist PGS–Outcome Association, Moderation, and Model Performance Analyses
 #
 # Purpose:
 # - fit logistic regression models for multiple binary outcomes
