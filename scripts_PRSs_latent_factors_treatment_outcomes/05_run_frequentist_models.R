@@ -1,29 +1,35 @@
 # ============================================================
-# Project: Transdiagnostic predictors of treatment outcomes
-# Script: Frequentist logistic regression models
+# Project: Latent Genomic Factors and Treatment Outcomes
+# Script: 05_run_frequentist_models.R
 #
 # Purpose:
 # - fit logistic regression models for multiple binary outcomes
 # - test associations between polygenic scores (PGSs) and outcomes
-# - evaluate selected PGS interaction terms
+# - evaluate PGS-by-moderator interaction terms
 # - compare nested models using likelihood-ratio tests and AIC
 # - estimate out-of-fold AUC with fold-specific scaling
 # - quantify incremental model performance using Tjur's and
 #   McFadden's pseudo-R2 relative to a covariate-only model
-# - calculate predicted probabilities for retained interactions
+# - calculate predicted probabilities for significant retained
+#   interactions
 # - estimate simple PGS slopes and contrasts between slopes
 # - save analysis-ready summary tables
 #
 # Notes:
-# - this script is written as a generic template and should be
-#   adapted to the variable names and structure of the cohort
+# - this script is a generic template and should be adapted to
+#   the variable names and structure of the cohort
 # - continuous variables are scaled using Gelman scaling:
 #   (x - mean) / (2 * SD)
-# - interaction models are retained when both:
+# - each PGS-by-moderator interaction model is evaluated
+#   separately against the base model
+# - an interaction term is retained when both:
 #     LRT p < 0.05
 #     delta AIC >= 2 relative to the base model
-# - post-hoc interaction analyses are descriptive and intended
-#   to aid interpretation of retained interaction effects
+# - if more than one interaction meets both criteria, all
+#   qualifying interaction terms are included jointly in the
+#   final model
+# - post-hoc analyses are performed for retained interaction
+#   terms with Wald p < 0.05 in the final model
 # ============================================================
 
 
@@ -49,12 +55,12 @@ data_file <- "analysis_ready_dataset.csv"
 output_dir <- "frequentist_outputs"
 
 # Replace these variable names with those used in the cohort.
-prs_vars <- c(
-  "PRS_1",
-  "PRS_2",
-  "PRS_3",
-  "PRS_4",
-  "PRS_5"
+pgs_vars <- c(
+  "PGS_1",
+  "PGS_2",
+  "PGS_3",
+  "PGS_4",
+  "PGS_5"
 )
 
 outcomes <- c(
@@ -93,7 +99,7 @@ cv_seed <- 123
 # calculated at -2 and +2 SD on the original PGS scale.
 # Because the PGS is Gelman-scaled as (x - mean) / (2 * SD),
 # these values correspond to -1 and +1 on the model scale.
-prediction_prs_values <- c(-1, 1)
+prediction_pgs_values <- c(-1, 1)
 
 # Continuous moderators are evaluated at the 25th, 50th,
 # and 75th percentiles of their raw distributions.
@@ -184,7 +190,7 @@ build_covariate_formula <- function(
 
 build_formula_from_interactions <- function(
   outcome,
-  prs,
+  pgs,
   interactions,
   site_terms,
   pc_vars,
@@ -194,7 +200,7 @@ build_formula_from_interactions <- function(
 ) {
 
   main_terms <- c(
-    prs,
+    pgs,
     baseline_severity_var,
     sex_var,
     age_var,
@@ -206,21 +212,21 @@ build_formula_from_interactions <- function(
   if ("severity" %in% interactions) {
     rhs_terms <- c(
       rhs_terms,
-      paste0(prs, ":", baseline_severity_var)
+      paste0(pgs, ":", baseline_severity_var)
     )
   }
 
   if ("sex" %in% interactions) {
     rhs_terms <- c(
       rhs_terms,
-      paste0(prs, ":", sex_var)
+      paste0(pgs, ":", sex_var)
     )
   }
 
   if ("age" %in% interactions) {
     rhs_terms <- c(
       rhs_terms,
-      paste0(prs, ":", age_var)
+      paste0(pgs, ":", age_var)
     )
   }
 
@@ -238,7 +244,7 @@ build_formula_from_interactions <- function(
 prepare_complete_case_data <- function(
   dat,
   outcome,
-  prs,
+  pgs,
   site_terms,
   pc_vars,
   age_var,
@@ -248,7 +254,7 @@ prepare_complete_case_data <- function(
 
   needed_vars <- c(
     outcome,
-    prs,
+    pgs,
     age_var,
     sex_var,
     baseline_severity_var,
@@ -335,6 +341,45 @@ select_interactions <- function(
     keep_sex = keep_sex,
     keep_age = keep_age
   )
+}
+
+
+identify_interaction_type <- function(
+  term,
+  pgs,
+  age_var,
+  sex_var,
+  baseline_severity_var
+) {
+
+  age_terms <- c(
+    paste0(pgs, ":", age_var),
+    paste0(age_var, ":", pgs)
+  )
+
+  severity_terms <- c(
+    paste0(pgs, ":", baseline_severity_var),
+    paste0(baseline_severity_var, ":", pgs)
+  )
+
+  sex_prefixes <- c(
+    paste0(pgs, ":", sex_var),
+    paste0(sex_var, ":", pgs)
+  )
+
+  if (term %in% age_terms) {
+    return("age")
+  }
+
+  if (term %in% severity_terms) {
+    return("severity")
+  }
+
+  if (any(startsWith(term, sex_prefixes))) {
+    return("sex")
+  }
+
+  NA_character_
 }
 
 
@@ -648,14 +693,14 @@ get_reference_profile <- function(
 
 build_prediction_data <- function(
   dat,
-  prs,
+  pgs,
   interaction,
   site_terms,
   pc_vars,
   age_var,
   sex_var,
   baseline_severity_var,
-  prs_values = c(-1, 1)
+  pgs_values = c(-1, 1)
 ) {
 
   ref <- get_reference_profile(
@@ -670,12 +715,12 @@ build_prediction_data <- function(
   if (interaction == "sex") {
 
     nd <- expand.grid(
-      PRS_VALUE = prs_values,
+      PGS_VALUE = pgs_values,
       SEX_LEVEL = levels(dat[[sex_var]]),
       stringsAsFactors = FALSE
     )
 
-    nd[[prs]] <- nd$PRS_VALUE
+    nd[[pgs]] <- nd$PGS_VALUE
 
     nd[[age_var]] <- ref[[age_var]]
     nd[[baseline_severity_var]] <- ref[[baseline_severity_var]]
@@ -709,12 +754,12 @@ build_prediction_data <- function(
     )
 
     nd <- expand.grid(
-      PRS_VALUE = prs_values,
+      PGS_VALUE = pgs_values,
       moderator_level = moderator_labels,
       stringsAsFactors = FALSE
     )
 
-    nd[[prs]] <- nd$PRS_VALUE
+    nd[[pgs]] <- nd$PGS_VALUE
 
     nd[[age_var]] <- moderator_values[
       match(
@@ -748,12 +793,12 @@ build_prediction_data <- function(
     )
 
     nd <- expand.grid(
-      PRS_VALUE = prs_values,
+      PGS_VALUE = pgs_values,
       moderator_level = moderator_labels,
       stringsAsFactors = FALSE
     )
 
-    nd[[prs]] <- nd$PRS_VALUE
+    nd[[pgs]] <- nd$PGS_VALUE
 
     nd[[age_var]] <- ref[[age_var]]
 
@@ -811,7 +856,7 @@ add_prediction_intervals <- function(
 
 clean_emtrends_summary <- function(
   x,
-  prs,
+  pgs,
   outcome,
   moderator,
   model_n,
@@ -821,7 +866,7 @@ clean_emtrends_summary <- function(
   out <- as.data.frame(x)
 
   trend_col <- paste0(
-    prs,
+    pgs,
     ".trend"
   )
 
@@ -834,7 +879,7 @@ clean_emtrends_summary <- function(
   out <- out %>%
     mutate(
       outcome = outcome,
-      PGS = prs,
+      PGS = pgs,
       moderator = moderator,
       n_complete_cases = model_n,
       OR = exp(logit_slope),
@@ -904,7 +949,7 @@ clean_emtrends_summary <- function(
 
 clean_contrast_summary <- function(
   x,
-  prs,
+  pgs,
   outcome,
   moderator,
   model_n,
@@ -931,7 +976,7 @@ clean_contrast_summary <- function(
   out %>%
     mutate(
       outcome = outcome,
-      PGS = prs,
+      PGS = pgs,
       moderator = moderator,
       n_complete_cases = model_n,
       OR_ratio = exp(log_OR_ratio),
@@ -987,7 +1032,7 @@ for (outcome in outcomes) {
 continuous_vars <- c(
   age_var,
   baseline_severity_var,
-  prs_vars,
+  pgs_vars,
   pc_vars
 )
 
@@ -996,16 +1041,16 @@ existing_continuous_vars <- intersect(
   names(dat_raw)
 )
 
-missing_prs_vars <- setdiff(
-  prs_vars,
+missing_pgs_vars <- setdiff(
+  pgs_vars,
   names(dat_raw)
 )
 
-if (length(missing_prs_vars) > 0) {
+if (length(missing_pgs_vars) > 0) {
   stop(
     "Missing PGS variables: ",
     paste(
-      missing_prs_vars,
+      missing_pgs_vars,
       collapse = ", "
     )
   )
@@ -1041,12 +1086,12 @@ for (outcome in outcomes) {
     )
   }
 
-  for (prs in prs_vars) {
+  for (pgs in pgs_vars) {
 
     dat_cc <- prepare_complete_case_data(
       dat = dat_scaled,
       outcome = outcome,
-      prs = prs,
+      pgs = pgs,
       site_terms = site_terms,
       pc_vars = pc_vars,
       age_var = age_var,
@@ -1057,7 +1102,7 @@ for (outcome in outcomes) {
     dat_cc_raw <- prepare_complete_case_data(
       dat = dat_raw,
       outcome = outcome,
-      prs = prs,
+      pgs = pgs,
       site_terms = site_terms,
       pc_vars = pc_vars,
       age_var = age_var,
@@ -1072,7 +1117,7 @@ for (outcome in outcomes) {
         "No complete-case data for ",
         outcome,
         " and ",
-        prs
+        pgs
       )
       next
     }
@@ -1096,7 +1141,7 @@ for (outcome in outcomes) {
 
     f_base <- build_formula_from_interactions(
       outcome = outcome,
-      prs = prs,
+      pgs = pgs,
       interactions = character(0),
       site_terms = site_terms,
       pc_vars = pc_vars,
@@ -1107,7 +1152,7 @@ for (outcome in outcomes) {
 
     f_severity <- build_formula_from_interactions(
       outcome = outcome,
-      prs = prs,
+      pgs = pgs,
       interactions = "severity",
       site_terms = site_terms,
       pc_vars = pc_vars,
@@ -1118,7 +1163,7 @@ for (outcome in outcomes) {
 
     f_sex <- build_formula_from_interactions(
       outcome = outcome,
-      prs = prs,
+      pgs = pgs,
       interactions = "sex",
       site_terms = site_terms,
       pc_vars = pc_vars,
@@ -1129,7 +1174,7 @@ for (outcome in outcomes) {
 
     f_age <- build_formula_from_interactions(
       outcome = outcome,
-      prs = prs,
+      pgs = pgs,
       interactions = "age",
       site_terms = site_terms,
       pc_vars = pc_vars,
@@ -1173,6 +1218,10 @@ for (outcome in outcomes) {
     aic_sex <- AIC(m_sex)
     aic_age <- AIC(m_age)
 
+    # Each interaction model is evaluated separately against
+    # the same base model. All interactions meeting both
+    # prespecified selection criteria are retained and then
+    # included jointly in the final model.
     lrt_severity <- anova(
       m_base,
       m_severity,
@@ -1223,7 +1272,7 @@ for (outcome in outcomes) {
 
     f_final <- build_formula_from_interactions(
       outcome = outcome,
-      prs = prs,
+      pgs = pgs,
       interactions = final_interactions,
       site_terms = site_terms,
       pc_vars = pc_vars,
@@ -1289,7 +1338,7 @@ for (outcome in outcomes) {
       c(
         age_var,
         baseline_severity_var,
-        prs,
+        pgs,
         pc_vars
       ),
       names(dat_cc_raw)
@@ -1362,7 +1411,7 @@ for (outcome in outcomes) {
         CI_low = exp(CI_low_beta),
         CI_high = exp(CI_high_beta),
         outcome = outcome,
-        PGS = prs,
+        PGS = pgs,
         chosen_model = chosen_model,
         n_complete_cases = n_cc,
         AUC_OOF_base = auc_oof_base,
@@ -1406,12 +1455,12 @@ for (outcome in outcomes) {
     model_selection_rows[[
       paste(
         outcome,
-        prs,
+        pgs,
         sep = "__"
       )
     ]] <- tibble(
       outcome = outcome,
-      PGS = prs,
+      PGS = pgs,
       n_complete_cases = n_cc,
       site_terms = paste(
         site_terms,
@@ -1464,12 +1513,12 @@ for (outcome in outcomes) {
     model_performance_rows[[
       paste(
         outcome,
-        prs,
+        pgs,
         sep = "__"
       )
     ]] <- tibble(
       outcome = outcome,
-      PGS = prs,
+      PGS = pgs,
       chosen_model = chosen_model,
       selected_interactions = ifelse(
         length(final_interactions) == 0,
@@ -1491,7 +1540,7 @@ for (outcome in outcomes) {
     final_model_rows[[
       paste(
         outcome,
-        prs,
+        pgs,
         sep = "__"
       )
     ]] <- final_tab
@@ -1499,7 +1548,7 @@ for (outcome in outcomes) {
     final_models[[
       paste(
         outcome,
-        prs,
+        pgs,
         sep = "__"
       )
     ]] <- list(
@@ -1507,7 +1556,7 @@ for (outcome in outcomes) {
       data = dat_cc,
       data_raw = dat_cc_raw,
       outcome = outcome,
-      prs = prs,
+      pgs = pgs,
       chosen_model = chosen_model,
       selected_interactions = final_interactions,
       site_terms = site_terms
@@ -1516,13 +1565,13 @@ for (outcome in outcomes) {
     oof_prediction_rows[[
       paste(
         outcome,
-        prs,
+        pgs,
         "base",
         sep = "__"
       )
     ]] <- tibble(
       outcome = outcome,
-      PGS = prs,
+      PGS = pgs,
       model = "base",
       y_true = dat_cc_raw[[outcome]],
       oof_pred = cv_base$oof_pred
@@ -1531,13 +1580,13 @@ for (outcome in outcomes) {
     oof_prediction_rows[[
       paste(
         outcome,
-        prs,
+        pgs,
         "final",
         sep = "__"
       )
     ]] <- tibble(
       outcome = outcome,
-      PGS = prs,
+      PGS = pgs,
       model = "final",
       y_true = dat_cc_raw[[outcome]],
       oof_pred = cv_final$oof_pred
@@ -1573,96 +1622,53 @@ selected_interaction_models <- model_selection_summary %>%
 
 
 # ============================================================
-# 6. Predicted probabilities for retained interactions
+# 6. Identify significant retained interaction terms
 # ============================================================
+# Only interaction terms present in the selected final models
+# and showing Wald p < 0.05 are carried forward to post-hoc
+# predicted-probability and simple-slope analyses.
 
-predicted_probability_rows <- list()
-
-for (
-  i in seq_len(
-    nrow(selected_interaction_models)
-  )
-) {
-
-  outcome <- selected_interaction_models$outcome[i]
-  prs <- selected_interaction_models$PGS[i]
-
-  interactions <- unlist(
-    strsplit(
-      selected_interaction_models$selected_interactions[i],
-      "\\s*,\\s*"
+significant_interactions <- final_OR_table %>%
+  mutate(
+    interaction = mapply(
+      FUN = identify_interaction_type,
+      term = term,
+      pgs = PGS,
+      MoreArgs = list(
+        age_var = age_var,
+        sex_var = sex_var,
+        baseline_severity_var = baseline_severity_var
+      ),
+      USE.NAMES = FALSE
     )
-  )
-
-  key <- paste(
-    outcome,
-    prs,
-    sep = "__"
-  )
-
-  obj <- final_models[[key]]
-
-  for (interaction in interactions) {
-
-    nd <- build_prediction_data(
-      dat = obj$data,
-      prs = prs,
-      interaction = interaction,
-      site_terms = obj$site_terms,
-      pc_vars = pc_vars,
-      age_var = age_var,
-      sex_var = sex_var,
-      baseline_severity_var = baseline_severity_var,
-      prs_values = prediction_prs_values
-    )
-
-    nd <- add_prediction_intervals(
-      fit = obj$fit,
-      newdata = nd
-    )
-
-    nd <- nd %>%
-      mutate(
-        outcome = outcome,
-        PGS = prs,
-        chosen_model = obj$chosen_model,
-        interaction = interaction
-      ) %>%
+  ) %>%
+  filter(
+    !is.na(interaction),
+    p_value < 0.05
+  ) %>%
+  left_join(
+    model_selection_summary %>%
       select(
         outcome,
         PGS,
-        chosen_model,
-        interaction,
-        moderator_level,
-        PRS_VALUE,
-        predicted_prob,
-        CI_low_prob,
-        CI_high_prob,
-        everything()
-      )
-
-    predicted_probability_rows[[
-      paste(
-        outcome,
-        prs,
-        interaction,
-        sep = "__"
-      )
-    ]] <- nd
-  }
-}
-
-predicted_probabilities <- bind_rows(
-  predicted_probability_rows
-)
+        selected_interactions
+      ),
+    by = c(
+      "outcome",
+      "PGS"
+    )
+  ) %>%
+  arrange(
+    outcome,
+    PGS,
+    interaction
+  )
 
 
 # ============================================================
-# 7. Simple-slope analyses and contrasts
+# 7. Audit retained interaction models
 # ============================================================
 
-simple_slope_rows <- list()
-slope_contrast_rows <- list()
 interaction_model_audit_rows <- list()
 
 for (
@@ -1672,18 +1678,141 @@ for (
 ) {
 
   outcome <- selected_interaction_models$outcome[i]
-  prs <- selected_interaction_models$PGS[i]
-
-  interactions <- unlist(
-    strsplit(
-      selected_interaction_models$selected_interactions[i],
-      "\\s*,\\s*"
-    )
-  )
+  pgs <- selected_interaction_models$PGS[i]
 
   key <- paste(
     outcome,
-    prs,
+    pgs,
+    sep = "__"
+  )
+
+  obj <- final_models[[key]]
+
+  interaction_model_audit_rows[[
+    length(interaction_model_audit_rows) + 1
+  ]] <- tibble(
+    outcome = outcome,
+    PGS = pgs,
+    selected_interactions = selected_interaction_models$selected_interactions[i],
+    n_complete_cases = nrow(obj$data),
+    formula = paste(
+      deparse(
+        formula(obj$fit)
+      ),
+      collapse = " "
+    )
+  )
+}
+
+interaction_model_audit <- bind_rows(
+  interaction_model_audit_rows
+)
+
+
+# ============================================================
+# 8. Predicted probabilities for significant retained
+#    interactions
+# ============================================================
+
+predicted_probability_rows <- list()
+
+for (
+  i in seq_len(
+    nrow(significant_interactions)
+  )
+) {
+
+  outcome <- significant_interactions$outcome[i]
+  pgs <- significant_interactions$PGS[i]
+  interaction <- significant_interactions$interaction[i]
+
+  key <- paste(
+    outcome,
+    pgs,
+    sep = "__"
+  )
+
+  obj <- final_models[[key]]
+
+  nd <- build_prediction_data(
+    dat = obj$data,
+    pgs = pgs,
+    interaction = interaction,
+    site_terms = obj$site_terms,
+    pc_vars = pc_vars,
+    age_var = age_var,
+    sex_var = sex_var,
+    baseline_severity_var = baseline_severity_var,
+    pgs_values = prediction_pgs_values
+  )
+
+  nd <- add_prediction_intervals(
+    fit = obj$fit,
+    newdata = nd
+  )
+
+  nd <- nd %>%
+    mutate(
+      outcome = outcome,
+      PGS = pgs,
+      chosen_model = obj$chosen_model,
+      interaction = interaction,
+      interaction_term = significant_interactions$term[i],
+      interaction_p_value = significant_interactions$p_value[i],
+      interaction_OR = significant_interactions$OR[i]
+    ) %>%
+    select(
+      outcome,
+      PGS,
+      chosen_model,
+      interaction,
+      interaction_term,
+      interaction_p_value,
+      interaction_OR,
+      moderator_level,
+      PGS_VALUE,
+      predicted_prob,
+      CI_low_prob,
+      CI_high_prob,
+      everything()
+    )
+
+  predicted_probability_rows[[
+    paste(
+      outcome,
+      pgs,
+      interaction,
+      sep = "__"
+    )
+  ]] <- nd
+}
+
+predicted_probabilities <- bind_rows(
+  predicted_probability_rows
+)
+
+
+# ============================================================
+# 9. Simple-slope analyses and contrasts for significant
+#    retained interactions
+# ============================================================
+
+simple_slope_rows <- list()
+slope_contrast_rows <- list()
+
+for (
+  i in seq_len(
+    nrow(significant_interactions)
+  )
+) {
+
+  outcome <- significant_interactions$outcome[i]
+  pgs <- significant_interactions$PGS[i]
+  interaction <- significant_interactions$interaction[i]
+
+  key <- paste(
+    outcome,
+    pgs,
     sep = "__"
   )
 
@@ -1693,231 +1822,205 @@ for (
   dat_cc <- obj$data
   dat_cc_raw <- obj$data_raw
 
-  interaction_model_audit_rows[[
-    length(
-      interaction_model_audit_rows
-    ) + 1
-  ]] <- tibble(
-    outcome = outcome,
-    PGS = prs,
-    selected_interactions = paste(
-      interactions,
-      collapse = ","
-    ),
-    n_complete_cases = nrow(dat_cc),
-    formula = paste(
-      deparse(
-        formula(fit)
-      ),
-      collapse = " "
+  # --------------------------------------------------------
+  # Sex interaction
+  # --------------------------------------------------------
+
+  if (interaction == "sex") {
+
+    specs_formula <- as.formula(
+      paste(
+        "~",
+        sex_var
+      )
     )
-  )
 
-  for (interaction in interactions) {
+    trends <- emtrends(
+      fit,
+      specs = specs_formula,
+      var = pgs
+    )
 
-    # --------------------------------------------------------
-    # Sex interaction
-    # --------------------------------------------------------
+    trend_summary <- summary(
+      trends,
+      infer = c(TRUE, TRUE),
+      type = "link"
+    )
 
-    if (interaction == "sex") {
+    simple_slope_rows[[
+      length(simple_slope_rows) + 1
+    ]] <- clean_emtrends_summary(
+      x = trend_summary,
+      pgs = pgs,
+      outcome = outcome,
+      moderator = sex_var,
+      model_n = nrow(dat_cc)
+    )
 
-      specs_formula <- as.formula(
-        paste(
-          "~",
-          sex_var
-        )
+    contrasts <- pairs(
+      trends,
+      adjust = "none"
+    )
+
+    contrast_summary <- summary(
+      contrasts,
+      infer = c(TRUE, TRUE),
+      type = "link"
+    )
+
+    slope_contrast_rows[[
+      length(slope_contrast_rows) + 1
+    ]] <- clean_contrast_summary(
+      x = contrast_summary,
+      pgs = pgs,
+      outcome = outcome,
+      moderator = sex_var,
+      model_n = nrow(dat_cc)
+    )
+  }
+
+  # --------------------------------------------------------
+  # Continuous-moderator interactions
+  # --------------------------------------------------------
+
+  if (
+    interaction %in%
+      c(
+        "age",
+        "severity"
       )
+  ) {
 
-      trends <- emtrends(
-        fit,
-        specs = specs_formula,
-        var = prs
+    moderator <- ifelse(
+      interaction == "age",
+      age_var,
+      baseline_severity_var
+    )
+
+    raw_values <- as.numeric(
+      quantile(
+        dat_cc_raw[[moderator]],
+        probs = moderator_probs,
+        na.rm = TRUE
       )
+    )
 
-      trend_summary <- summary(
-        trends,
-        infer = c(TRUE, TRUE),
-        type = "link"
+    scaled_values <- raw_to_gelman_scaled(
+      x = raw_values,
+      raw_reference = dat_raw[[moderator]]
+    )
+
+    raw_levels <- tibble(
+      level_label = c(
+        "P25",
+        "P50",
+        "P75"
+      ),
+      raw_value = raw_values,
+      scaled_value = scaled_values
+    )
+
+    at_list <- list(
+      scaled_values
+    )
+
+    names(at_list) <- moderator
+
+    specs_formula <- as.formula(
+      paste(
+        "~",
+        moderator
       )
+    )
 
-      simple_slope_rows[[
-        length(simple_slope_rows) + 1
-      ]] <- clean_emtrends_summary(
-        x = trend_summary,
-        prs = prs,
-        outcome = outcome,
-        moderator = sex_var,
-        model_n = nrow(dat_cc)
+    trends <- emtrends(
+      fit,
+      specs = specs_formula,
+      var = pgs,
+      at = at_list
+    )
+
+    trend_summary <- summary(
+      trends,
+      infer = c(TRUE, TRUE),
+      type = "link"
+    )
+
+    simple_slope_rows[[
+      length(simple_slope_rows) + 1
+    ]] <- clean_emtrends_summary(
+      x = trend_summary,
+      pgs = pgs,
+      outcome = outcome,
+      moderator = moderator,
+      model_n = nrow(dat_cc),
+      raw_levels = raw_levels
+    )
+
+    contrasts <- pairs(
+      trends,
+      adjust = "none"
+    )
+
+    contrast_summary <- summary(
+      contrasts,
+      infer = c(TRUE, TRUE),
+      type = "link"
+    )
+
+    contrast_labels <- c(
+      paste0(
+        "P25 vs P50; ",
+        moderator,
+        " = ",
+        raw_values[1],
+        " vs ",
+        raw_values[2]
+      ),
+      paste0(
+        "P25 vs P75; ",
+        moderator,
+        " = ",
+        raw_values[1],
+        " vs ",
+        raw_values[3]
+      ),
+      paste0(
+        "P50 vs P75; ",
+        moderator,
+        " = ",
+        raw_values[2],
+        " vs ",
+        raw_values[3]
       )
+    )
 
-      contrasts <- pairs(
-        trends,
-        adjust = "none"
-      )
-
-      contrast_summary <- summary(
-        contrasts,
-        infer = c(TRUE, TRUE),
-        type = "link"
-      )
-
-      slope_contrast_rows[[
-        length(slope_contrast_rows) + 1
-      ]] <- clean_contrast_summary(
-        x = contrast_summary,
-        prs = prs,
-        outcome = outcome,
-        moderator = sex_var,
-        model_n = nrow(dat_cc)
-      )
-    }
-
-    # --------------------------------------------------------
-    # Continuous-moderator interactions
-    # --------------------------------------------------------
-
-    if (
-      interaction %in%
-        c(
-          "age",
-          "severity"
-        )
-    ) {
-
-      moderator <- ifelse(
-        interaction == "age",
-        age_var,
-        baseline_severity_var
-      )
-
-      raw_values <- as.numeric(
-        quantile(
-          dat_cc_raw[[moderator]],
-          probs = moderator_probs,
-          na.rm = TRUE
-        )
-      )
-
-      scaled_values <- raw_to_gelman_scaled(
-        x = raw_values,
-        raw_reference = dat_cc_raw[[moderator]]
-      )
-
-      raw_levels <- tibble(
-        level_label = c(
-          "P25",
-          "P50",
-          "P75"
-        ),
-        raw_value = raw_values,
-        scaled_value = scaled_values
-      )
-
-      at_list <- list(
-        scaled_values
-      )
-
-      names(at_list) <- moderator
-
-      specs_formula <- as.formula(
-        paste(
-          "~",
-          moderator
-        )
-      )
-
-      trends <- emtrends(
-        fit,
-        specs = specs_formula,
-        var = prs,
-        at = at_list
-      )
-
-      trend_summary <- summary(
-        trends,
-        infer = c(TRUE, TRUE),
-        type = "link"
-      )
-
-      simple_slope_rows[[
-        length(simple_slope_rows) + 1
-      ]] <- clean_emtrends_summary(
-        x = trend_summary,
-        prs = prs,
-        outcome = outcome,
-        moderator = moderator,
-        model_n = nrow(dat_cc),
-        raw_levels = raw_levels
-      )
-
-      contrasts <- pairs(
-        trends,
-        adjust = "none"
-      )
-
-      contrast_summary <- summary(
-        contrasts,
-        infer = c(TRUE, TRUE),
-        type = "link"
-      )
-
-      contrast_labels <- c(
-        paste0(
-          "P25 vs P50; ",
-          moderator,
-          " = ",
-          raw_values[1],
-          " vs ",
-          raw_values[2]
-        ),
-        paste0(
-          "P25 vs P75; ",
-          moderator,
-          " = ",
-          raw_values[1],
-          " vs ",
-          raw_values[3]
-        ),
-        paste0(
-          "P50 vs P75; ",
-          moderator,
-          " = ",
-          raw_values[2],
-          " vs ",
-          raw_values[3]
-        )
-      )
-
-      slope_contrast_rows[[
-        length(slope_contrast_rows) + 1
-      ]] <- clean_contrast_summary(
-        x = contrast_summary,
-        prs = prs,
-        outcome = outcome,
-        moderator = moderator,
-        model_n = nrow(dat_cc),
-        contrast_labels = contrast_labels
-      )
-    }
+    slope_contrast_rows[[
+      length(slope_contrast_rows) + 1
+    ]] <- clean_contrast_summary(
+      x = contrast_summary,
+      pgs = pgs,
+      outcome = outcome,
+      moderator = moderator,
+      model_n = nrow(dat_cc),
+      contrast_labels = contrast_labels
+    )
   }
 }
 
-simple_prs_slopes <- bind_rows(
+simple_pgs_slopes <- bind_rows(
   simple_slope_rows
 )
 
-prs_slope_contrasts <- bind_rows(
+pgs_slope_contrasts <- bind_rows(
   slope_contrast_rows
 )
 
-interaction_model_audit <- bind_rows(
-  interaction_model_audit_rows
-)
-
 
 # ============================================================
-# 8. Save outputs
+# 10. Save outputs
 # ============================================================
+
 
 dir.create(
   output_dir,
@@ -1966,6 +2069,14 @@ write_csv(
 )
 
 write_csv(
+  significant_interactions,
+  file.path(
+    output_dir,
+    "significant_interactions.csv"
+  )
+)
+
+write_csv(
   predicted_probabilities,
   file.path(
     output_dir,
@@ -1974,18 +2085,18 @@ write_csv(
 )
 
 write_csv(
-  simple_prs_slopes,
+  simple_pgs_slopes,
   file.path(
     output_dir,
-    "simple_prs_slopes.csv"
+    "simple_pgs_slopes.csv"
   )
 )
 
 write_csv(
-  prs_slope_contrasts,
+  pgs_slope_contrasts,
   file.path(
     output_dir,
-    "prs_slope_contrasts.csv"
+    "pgs_slope_contrasts.csv"
   )
 )
 
@@ -2004,9 +2115,10 @@ write_xlsx(
     model_performance = model_performance_table,
     OOF_predictions = oof_predictions_table,
     selected_interactions = selected_interaction_models,
+    significant_interactions = significant_interactions,
     predicted_probabilities = predicted_probabilities,
-    simple_slopes = simple_prs_slopes,
-    slope_contrasts = prs_slope_contrasts,
+    simple_slopes = simple_pgs_slopes,
+    slope_contrasts = pgs_slope_contrasts,
     interaction_model_audit = interaction_model_audit
   ),
   path = file.path(
