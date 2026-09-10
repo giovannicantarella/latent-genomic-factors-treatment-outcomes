@@ -1,5 +1,6 @@
 # ============================================================
-# Adjust selected PGS effects for multiple testing using
+# Project: Transdiagnostic predictors of treatment outcomes
+# Script: Adjust selected PGS effects for multiple testing using
 # Benjamini-Hochberg FDR
 # ============================================================
 # Multiple testing is controlled across the five outcome-specific
