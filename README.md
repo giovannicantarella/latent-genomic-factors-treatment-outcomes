@@ -1,24 +1,31 @@
 # Latent Genomic Factors and Treatment Outcomes
 
-This repository contains scripts for preprocessing GWAS summary statistics, computing polygenic scores (PGSs) using PRS-CS, preparing cohort-level datasets with PGSs and covariates, and testing their association with treatment outcomes.
+This repository contains scripts for preprocessing GWAS summary statistics, computing polygenic scores (PGSs) using PRS-CS, preparing cohort-level datasets with PGSs and covariates, and testing their associations with treatment outcomes.
 
-The code is designed to be applied across different cohorts and can be adapted to datasets with similar structure.
+The code is organised as a sequential analysis pipeline and is provided as a reproducible template that can be applied to datasets with a comparable structure after specifying the required input paths, variable names, and cohort-specific covariates.
 
-The pipeline integrates:
+The pipeline includes:
 
-* GWAS summary statistics preprocessing
-* PGS computation (PRS-CS + PLINK2)
-* Dataset preparation
-* Frequentist logistic regression analyses
-* Multiple testing correction
-* Bayesian sensitivity analyses
+- GWAS summary-statistics preprocessing
+- Effective sample-size estimation
+- PGS computation using PRS-CS and PLINK2
+- Cohort-level dataset preparation
+- Frequentist logistic regression analyses
+- PGS × moderator interaction testing
+- Model selection using likelihood-ratio tests and AIC
+- Out-of-fold discrimination assessment
+- Incremental pseudo-R² estimation
+- Post-hoc interaction analyses
+- Benjamini-Hochberg false discovery rate correction
+- Bayesian sensitivity analyses
 
 ---
 
 ## Repository structure
 
-```
+```text
 scripts_PRSs_latent_factors_treatment_outcomes/
+│
 ├── 00_compute_effective_sample_size.sh
 ├── 01_munge_sumstats.sh
 ├── 02_run_PRScs.sh
@@ -26,242 +33,544 @@ scripts_PRSs_latent_factors_treatment_outcomes/
 ├── 04_prepare_dataset.R
 ├── 05_run_frequentist_models.R
 ├── 06_FDR_correction_multiple_testing.R
-├── 07_run_bayesian_sensitivity_analyses.R
+└── 07_run_bayesian_sensitivity_analyses.R
 ```
 
-Each script represents one step of the pipeline and can be adapted to different cohorts by modifying input data and variable mappings.
+Each script corresponds to one step of the analytical workflow.
 
 ---
 
-## Analytical workflow
+# Analytical workflow
 
-The analysis is structured in eight sequential steps:
+## 1. Effective sample-size estimation
 
-1. Effective sample size calculation
-2. GWAS summary statistics preprocessing
-3. PRS-CS estimation
-4. Individual-level PGS computation
-5. Dataset preparation
-6. Frequentist association analyses
-7. Multiple testing correction
-8. Bayesian sensitivity analyses
+### `00_compute_effective_sample_size.sh`
 
----
+Estimates SNP-level effective sample size from GWAS summary statistics and calculates the mean effective sample size across valid variants.
 
-## Scripts description
+For each SNP:
 
-### 00 – Effective sample size calculation
+```text
+Neff = 4 / [2 × MAF × (1 − MAF) × SE²]
+```
 
-Computes the effective sample size (Neff) from GWAS summary statistics.
+where:
 
-Main steps:
+- `MAF` is the minor allele frequency;
+- `SE` is the standard error of the GWAS effect estimate.
 
-* Read GWAS summary statistics
-* Calculate effective sample size
-* Generate output for downstream preprocessing
+Rows with missing or invalid MAF or SE values are excluded before calculation.
 
----
+The mean effective sample size used in the downstream PGS pipeline was:
 
-### 01 – Summary statistics preprocessing
-
-Formats and filters summary statistics using LDSC.
-
-Main features:
-
-* INFO filtering
-* MAF filtering
-* HapMap3 SNP restriction
-* LDSC-compatible formatting
-
-Output:
-
-* Filtered summary statistics for downstream PGS computation
+```text
+Neff = 71,579
+```
 
 ---
 
-### 02 – PRS-CS
+## 2. GWAS summary-statistics preprocessing
 
-Runs PRS-CS separately across chromosomes.
+### `01_munge_sumstats.sh`
 
-Main features:
+Prepares GWAS summary statistics using LDSC `munge_sumstats.py`.
 
-* Bayesian continuous-shrinkage framework
-* Chromosome-wise estimation
-* Parallel execution using tmux sessions
-* Posterior SNP weight estimation
+The preprocessing step:
 
-Output:
+- restricts variants to HapMap3 SNPs;
+- excludes variants with minor allele frequency below 0.01;
+- excludes variants with imputation INFO score below 0.90;
+- retains allele-frequency information;
+- uses the GWAS regression coefficient as the signed summary statistic;
+- assigns the effective GWAS sample size used in downstream analyses.
 
-* Chromosome-specific posterior SNP weights
+Main LDSC settings:
 
----
+```text
+--N 71579
+--merge-alleles w_hm3.snplist
+--chunksize 500000
+--maf-min 0.01
+--info-min 0.9
+--signed-sumstats BETA,0
+--keep-maf
+```
 
-### 03 – PGS computation
-
-Combines chromosome-specific weights and computes individual-level PGSs using PLINK2.
-
-Main steps:
-
-* Combine chromosome-specific PRS-CS weights
-* Prepare scoring files
-* Compute individual-level PGSs
-* Generate score files for each latent genomic factor
-
----
-
-### 04 – Dataset preparation
-
-Builds the cohort-level analytic dataset.
-
-Main steps:
-
-* Read cohort-level data
-* Merge PGSs with the cohort dataset
-* Merge external covariates (e.g. ancestry principal components and site variables)
-* Harmonise duplicated variables created during merging
-* Convert variable types where needed
-* Standardise PGSs
-* Derive analysis-ready outcomes when required
+The script is provided as a generic template. Input paths and column names should be modified when required by the source GWAS summary statistics.
 
 ---
 
-### 05 – Frequentist association analyses
+## 3. PRS-CS posterior effect-size estimation
 
-Runs logistic regression models across multiple outcomes and PGSs.
+### `02_run_PRScs.sh`
 
-Main features:
+Runs PRS-CS independently for chromosomes 1–22.
 
-* Covariate-only reference models including age, sex, baseline severity, ancestry principal components, and recruitment site
-* Base models including PGS and prespecified covariates
-* PGS × baseline severity interaction models
-* PGS × sex interaction models
-* PGS × age interaction models
-* Model comparison using likelihood-ratio tests and AIC
-* Interaction retention based on LRT p < 0.05 and ΔAIC ≥ 2
-* 10-fold out-of-fold AUC estimation
-* Tjur’s and McFadden’s pseudo-R² for covariate-only and selected models
-* Incremental pseudo-R² relative to the covariate-only model
-* Post-hoc predicted probabilities for retained interactions
-* Simple PGS slopes and contrasts across moderator levels
+PRS-CS estimates posterior SNP effect sizes using a Bayesian continuous-shrinkage prior while accounting for linkage disequilibrium.
 
-For selected main-effect models, incremental pseudo-R² reflects the addition of the PGS term to the covariate-only model.
+The analysis uses a European-ancestry LD reference panel from the 1000 Genomes Project Phase 3.
 
-For selected moderation models, incremental pseudo-R² reflects the joint addition of the PGS main effect and the corresponding PGS × moderator interaction term.
+The following PRS-CS parameters are specified:
 
-Incremental pseudo-R² values are reported in percentage points (pp).
+```text
+a = 1.0
+b = 0.5
+phi = 0.1
+n_gwas = 71,579
 
-Output:
+n_iter = 1,000
+n_burnin = 500
+thin = 5
+```
 
-* Model selection summaries
-* Odds ratios and 95% confidence intervals
-* Coefficient-specific p-values
-* Out-of-fold AUC estimates
-* Tjur’s and McFadden’s pseudo-R² estimates
-* Incremental pseudo-R² values
-* Model performance tables
-* Predicted probabilities
-* Simple-slope estimates and contrasts
+The corresponding PRS-CS arguments are:
 
----
+```text
+--a=1.0
+--b=0.5
+--phi=0.1
+--n_gwas=71579
+--n_iter=1000
+--n_burnin=500
+--thin=5
+--write_pst=FALSE
+--write_psi=FALSE
+```
 
-### 06 – Multiple testing correction
+PRS-CS is run separately for chromosomes 1–22.
 
-Applies the Benjamini–Hochberg false discovery rate correction to frequentist association results.
-
-Main features:
-
-* Correction across outcome-specific tests within each PGS
-* Two-sided statistical testing
-* FDR significance threshold of q < 0.05
+Chromosome-specific jobs are launched in parallel using independent `tmux` sessions. Standard output and standard error are written to chromosome-specific log files.
 
 ---
 
-### 07 – Bayesian sensitivity analyses
+## 4. Individual-level PGS computation
 
-Re-estimates the models selected in the frequentist analysis using Bayesian logistic regression.
+### `03_compute_PRSs.sh`
 
-Main features:
+Combines chromosome-specific posterior SNP-effect files generated by PRS-CS and calculates individual-level PGSs using PLINK2.
 
-* Same model specification selected in the frequentist analysis
-* No additional model-selection step
-* Weakly informative Normal(0, 0.5) priors for regression coefficients
-* Posterior odds ratios and 95% credible intervals
-* Posterior predicted probabilities for retained interaction models
+Chromosome-specific weight files for chromosomes 1–22 are first concatenated into a single genome-wide scoring file.
 
-Output:
+PGSs are then calculated using:
 
-* Posterior coefficient estimates
-* Posterior odds ratios and credible intervals
-* Posterior predicted probabilities
+```text
+--score <combined_weights_file> 2 4 6 no-mean-imputation
+--threads 4
+--memory 24000
+```
 
----
+For the PRS-CS posterior-weight files used by the script:
 
-## Requirements
+- column 2 is used as the variant identifier;
+- column 4 is used as the effect allele;
+- column 6 is used as the posterior SNP weight.
 
-R (≥ 4.0 recommended)
+Mean imputation of missing genotypes is disabled during scoring.
 
-Additional software:
-
-* Bash
-* Python 2 (for LDSC)
-* Python 3 (for PRS-CS)
-* PLINK2
-* tmux
-
-Key R packages:
-
-* dplyr
-* tidyr
-* tibble
-* readr
-* stringr
-* ggplot2
-* emmeans
-* writexl
-* rstanarm
-* posterior
-
-External tools:
-
-* LDSC: https://github.com/bulik/ldsc
-* PRS-CS: https://github.com/getian107/PRScs
+The script requests four computational threads and up to 24,000 MB of memory.
 
 ---
 
-## Data
+## 5. Cohort-level dataset preparation
 
-* GWAS summary statistics are publicly available and should be downloaded separately
-* Individual-level cohort data are not included in this repository
-* Input and output paths must be adapted locally
+### `04_prepare_dataset.R`
 
----
+Prepares the analysis-ready cohort dataset.
 
-## General principles
+The script can be configured to:
 
-* Scripts are generic templates, not cohort-specific pipelines
-* Cohort differences are handled at the level of:
+- read phenotype and covariate data;
+- import individual-level PGSs;
+- merge PGSs with cohort data using subject identifiers;
+- merge ancestry principal components and other external covariates;
+- harmonise duplicated variables generated during merging;
+- convert variables to the required data types;
+- derive analysis outcomes where required;
+- standardise PGSs and continuous covariates;
+- check the resulting analysis-ready dataset.
 
-  * input data
-  * variable naming
-  * outcome definitions
-  * covariate and site structures
-* The same complete-case sample is used when comparing candidate models for each PGS-outcome pair
-* Covariate-only and selected models are evaluated on the same analysis sample when calculating incremental pseudo-R²
-* Continuous predictors are standardised before regression modelling
-* Bayesian models reproduce the specifications selected in the frequentist analysis
+Dataset paths, variable names, outcomes, and covariates are defined in the configuration section and should be modified for the dataset being analysed.
 
 ---
 
-## Notes
+## 6. Frequentist association and moderation analyses
 
-* Scripts are intended to be run sequentially
-* File paths must be adapted locally
-* Subject identifiers should be harmonised across datasets before merging
-* Raw individual-level data are not included in this repository
-* Outputs are generated as tables and model objects for downstream use
+### `05_run_frequentist_models.R`
+
+Tests associations between PGSs and binary treatment outcomes using multivariable logistic regression.
+
+The analysis is performed separately for each PGS–outcome pair.
+
+Continuous predictors are scaled according to:
+
+```text
+(x − mean) / (2 × SD)
+```
+
+This scaling expresses a one-unit change in a continuous predictor as a two-standard-deviation difference on its original scale.
+
+Models include:
+
+- PGS;
+- age;
+- sex;
+- baseline depressive severity;
+- ancestry principal components;
+- outcome-specific recruitment-site covariates.
+
+### Candidate models
+
+Four candidate models are fitted for each PGS–outcome pair:
+
+1. base model containing PGS and covariate main effects;
+2. PGS × baseline depressive severity interaction model;
+3. PGS × sex interaction model;
+4. PGS × age interaction model.
+
+Each interaction model is evaluated separately against the same base model.
+
+### Interaction selection
+
+An interaction term is retained when both criteria are satisfied:
+
+```text
+LRT p < 0.05
+ΔAIC ≥ 2
+```
+
+where:
+
+```text
+ΔAIC = AICbase − AICinteraction
+```
+
+If no interaction satisfies both criteria, the base model is retained.
+
+If one interaction satisfies both criteria, that interaction is included in the final model.
+
+If more than one interaction independently satisfies both criteria, all qualifying interaction terms are included jointly in the final model.
+
+No secondary selection step is applied to choose a single interaction among multiple qualifying terms.
+
+### Effect estimates
+
+For each final model, the script extracts:
+
+- regression coefficients;
+- standard errors;
+- odds ratios;
+- 95% confidence intervals;
+- nominal two-sided p-values.
 
 ---
 
-## Contact
+## 7. Out-of-fold model discrimination
 
-For questions or collaboration, please contact the repository owner.
+Model discrimination is assessed using stratified 10-fold out-of-fold prediction.
+
+Area under the receiver operating characteristic curve is calculated from predictions for observations that were not used to fit the corresponding fold-specific model.
+
+The analysis uses:
+
+```text
+10 folds
+```
+
+with a fixed random seed for reproducibility.
+
+Predictor scaling is estimated within each training fold and then applied to the corresponding held-out fold, avoiding information leakage between training and test data.
+
+OOF-AUC values are calculated for the relevant base and final models.
+
+Differences in discrimination are expressed as:
+
+```text
+ΔAUC = AUCfinal − AUCbase
+```
+
+---
+
+## 8. Incremental pseudo-R²
+
+Selected models are compared with corresponding covariate-only reference models using:
+
+- Tjur's pseudo-R²;
+- McFadden's pseudo-R².
+
+Covariate-only models include:
+
+- age;
+- sex;
+- baseline depressive severity;
+- ancestry principal components;
+- recruitment-site covariates.
+
+For selected main-effect models, the corresponding PGS main effect is added to the covariate-only model.
+
+For selected moderation models, the PGS main effect and the retained PGS × moderator interaction term(s) are added.
+
+The incremental contribution of the PGS-related terms is calculated as:
+
+```text
+ΔR² = R²selected model − R²covariate-only model
+```
+
+for both Tjur's and McFadden's pseudo-R².
+
+---
+
+## 9. Post-hoc interaction analyses
+
+Retained interaction terms that are nominally significant in the final model are examined using post-hoc analyses.
+
+### Predicted probabilities
+
+Predicted probabilities are calculated at the:
+
+```text
+25th percentile
+50th percentile
+75th percentile
+```
+
+of continuous moderators.
+
+PGS values are evaluated at:
+
+```text
+−2 SD
++2 SD
+```
+
+on the original PGS scale.
+
+Because the models use `(x − mean)/(2 × SD)` scaling, these values correspond to:
+
+```text
+−1
++1
+```
+
+on the model scale.
+
+For interactions with sex, predicted probabilities are calculated separately across the relevant sex levels.
+
+### Simple slopes
+
+Simple PGS slopes are estimated using `emmeans::emtrends`.
+
+For interactions with continuous moderators, slopes are estimated at the 25th, 50th, and 75th percentiles of the moderator distribution.
+
+For interactions with sex, PGS slopes are estimated separately by sex.
+
+---
+
+## 10. Multiple-testing correction
+
+### `06_FDR_correction_multiple_testing.R`
+
+Applies Benjamini-Hochberg false discovery rate correction to the frequentist association results.
+
+Multiple testing is controlled across the five outcome-specific tests within each PGS testing family.
+
+The number of outcome-specific tests is:
+
+```text
+m = 5
+```
+
+Statistical significance after correction is defined as:
+
+```text
+q < 0.05
+```
+
+The multiple-testing correction is kept separate from model fitting so that the definition of the testing families and the resulting adjusted p-values can be inspected independently.
+
+---
+
+## 11. Bayesian sensitivity analyses
+
+### `07_run_bayesian_sensitivity_analyses.R`
+
+Fits Bayesian logistic regression models corresponding to the frequentist analyses as sensitivity analyses.
+
+Bayesian models use weakly informative Normal priors:
+
+```text
+Normal(0, 0.5)
+```
+
+for regression coefficients.
+
+The Bayesian models use the same general outcome, covariate, and interaction structure as the corresponding frequentist models.
+
+Posterior coefficient estimates and uncertainty intervals are used to assess the direction and magnitude of the corresponding associations under the Bayesian specification.
+
+---
+
+# Software environment
+
+The main software environment used for the analysis pipeline was:
+
+| Software | Version |
+|---|---|
+| R | 4.4.2 (2024-10-31) |
+| macOS | Sonoma 14.1.1 |
+| Architecture | ARM64 |
+| Python 3 | 3.11.0 |
+| pip | 22.3 |
+| LDSC | 1.0.1 |
+| PRS-CS | 9 April 2024 update |
+| PLINK2 | 2.0.0-a.7 M1 (2 July 2025) |
+| tmux | 3.4 *|
+| Bash | 3.2.57 |
+| Git | 2.39.3 (Apple Git-145) |
+
+\*`tmux` was used only for job/session management.
+
+---
+
+## R packages
+
+The principal R packages and versions recorded for the analysis environment were:
+
+| Package | Version |
+|---|---:|
+| dplyr | 1.1.4 |
+| tidyr | 1.3.1 |
+| tibble | 3.2.1 |
+| readr | 2.1.5 |
+| stringr | 1.5.1 |
+| ggplot2 | 3.5.1 |
+| emmeans | 1.10.6 |
+| writexl | 1.5.4 |
+| rstanarm | 2.32.2 |
+| posterior | 1.6.1 |
+
+Additional packages loaded by the Bayesian modelling environment included:
+
+| Package | Version |
+|---|---:|
+| rstan | 2.32.7 |
+| StanHeaders | 2.32.10 |
+| loo | 2.9.0 |
+| bayesplot | 1.15.0 |
+
+The recorded R environment used:
+
+```text
+R 4.4.2
+Platform: aarch64-apple-darwin20
+Running under: macOS Sonoma 14.1.1
+```
+
+---
+
+# External resources
+
+The analysis pipeline requires external resources that are not distributed with this repository.
+
+These include:
+
+- LDSC;
+- PRS-CS;
+- HapMap3 SNP reference list;
+- European-ancestry PRS-CS LD reference panel;
+- GWAS summary statistics for the latent genomic factors;
+- individual-level target genotype data.
+
+These resources should be obtained from their original repositories or data providers and their local paths specified in the configuration sections of the corresponding scripts.
+
+---
+
+# Data
+
+GWAS summary statistics are not stored directly in this repository and should be obtained from the corresponding source study or authorised repository.
+
+Individual-level genotype, phenotype, and clinical data are not included in the repository.
+
+The scripts are therefore supplied as analysis templates rather than together with redistributable participant-level data.
+
+Users must define the paths to:
+
+- GWAS summary statistics;
+- LD reference files;
+- target genotype files;
+- phenotype data;
+- covariate data;
+- PGS files;
+- output directories.
+
+---
+
+# General analytical principles
+
+The scripts use the following conventions:
+
+- the same analytical framework is applied across PGSs and outcomes;
+- PGSs are standardised before association analyses;
+- continuous model predictors use `(x − mean)/(2 × SD)` scaling;
+- logistic models are fitted using complete-case data for the variables required by each PGS–outcome model;
+- interaction candidates are evaluated separately against the base model;
+- every interaction satisfying both the LRT and ΔAIC criteria is retained;
+- multiple qualifying interactions are entered jointly in the final model;
+- post-hoc analyses are restricted to retained interaction terms that are nominally significant in the final model;
+- multiple-testing correction is performed separately from model fitting;
+- FDR correction is based on five outcome-specific tests within each PGS testing family;
+- out-of-fold predictions are used to estimate model discrimination;
+- incremental pseudo-R² is calculated relative to covariate-only reference models;
+- individual-level data and subject identifiers are not hard-coded into the public scripts;
+- dataset-specific paths and variable names are defined through script configuration sections.
+
+---
+
+# Usage
+
+Run the pipeline in the following order:
+
+```text
+00_compute_effective_sample_size.sh
+01_munge_sumstats.sh
+02_run_PRScs.sh
+03_compute_PRSs.sh
+04_prepare_dataset.R
+05_run_frequentist_models.R
+06_FDR_correction_multiple_testing.R
+07_run_bayesian_sensitivity_analyses.R
+```
+
+Before running the scripts:
+
+1. replace placeholder paths with valid local paths;
+2. confirm the column names in the GWAS summary statistics;
+3. confirm PGS, phenotype, outcome, and covariate variable names;
+4. specify the recruitment-site covariates required for each outcome;
+5. confirm the scoring-column indices of the PRS-CS posterior-weight files;
+6. confirm that the required software and reference datasets are available.
+
+Example:
+
+```bash
+bash 00_compute_effective_sample_size.sh /path/to/input_file.dat
+```
+
+The subsequent Bash and R scripts can then be run after updating their configuration sections.
+
+---
+
+# Reproducibility notes
+
+The scripts are structured so that dataset-specific information is concentrated in configuration sections wherever possible.
+
+Absolute personal paths, participant-level values, subject identifiers, and study-specific individual-level data should not be committed to the public repository.
+
+The exact numerical results reported in the associated manuscript require access to the original cohort-level phenotype and genotype data and therefore cannot be regenerated from the public repository alone.
+
+The repository documents the computational workflow, model specifications, model-selection rules, software environment, multiple-testing procedure, and main computational settings used in the analyses.
+
+---
+
+# Contact
+
+For questions regarding the analysis code or repository, please contact the repository owner.
